@@ -1,0 +1,228 @@
+// prisma/schema.prisma - Updated with WebhookEvent model
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  email                String   @unique
+  name                 String?
+  image                String?
+  password             String?  // Added for credentials authentication
+  phone                String?
+  timezone             String?
+  twoFactorEnabled     Boolean  @default(false)
+  passwordUpdatedAt    DateTime?
+  notificationSettings String   @default("{}")
+  securitySettings     String   @default("{}")
+  preferences          String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  organizations OrganizationMember[]
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organization {
+  id                   String    @id @default(cuid())
+  name                 String
+  slug                 String    @unique
+  email                String?
+  website              String?
+  phone                String?
+  address              String?
+  timezone             String    @default("UTC")
+  logo                 String?
+  industry             String    @default("Other")
+  companySize          String    @default("1-10")
+  currency             String    @default("USD")
+  subscriptionTier     String    @default("free")
+  subscriptionStatus   String    @default("active")
+  subscriptionEndsAt   DateTime?
+  trialEndsAt          DateTime?
+  billingEmail         String?
+  billingAddress       String?
+  settings             String    @default("{}")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  members          OrganizationMember[]
+  integrations     Integration[]
+  insights         Insight[]
+  reports          Report[]
+  scheduledReports ScheduledReport[]
+  invitations      OrganizationInvitation[]
+}
+
+model OrganizationMember {
+  id             String @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String @default("member") // owner, admin, member, viewer
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+model OrganizationInvitation {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           String
+  invitedBy      String
+  token          String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+}
+
+model Integration {
+  id                 String    @id @default(cuid())
+  organizationId     String
+  platform           String    // shopify, stripe, google_analytics
+  platformAccountId  String?
+  accessToken        String?
+  refreshToken       String?
+  tokenExpiresAt     DateTime?
+  status             String    @default("active")
+  lastSyncAt         DateTime?
+  metadata           String    @default("{}")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dataPoints     DataPoint[]
+  webhookEvents  WebhookEvent[]
+
+  @@unique([organizationId, platform])
+}
+
+model DataPoint {
+  id             String   @id @default(cuid())
+  integrationId  String
+  metricType     String   // revenue, orders, sessions, customers
+  value          Float
+  metadata       String   @default("{}")
+  dateRecorded   DateTime
+  createdAt      DateTime @default(now())
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId, metricType, dateRecorded])
+}
+
+model WebhookEvent {
+  id             String    @id @default(cuid())
+  integrationId  String
+  topic          String    // webhook topic/event type
+  status         String    // received, processed, failed, signature_verification_failed, invalid_json
+  externalId     String?   // external event ID from the platform
+  error          String?
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  metadata       String    @default("{}")
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId, topic, receivedAt])
+  @@index([integrationId, status])
+}
+
+model Insight {
+  id             String  @id @default(cuid())
+  organizationId String
+  type           String  // trend, anomaly, recommendation
+  title          String
+  description    String
+  impactScore    Int     // 1-10
+  isRead         Boolean @default(false)
+  metadata       String  @default("{}")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model Report {
+  id               String   @id @default(cuid())
+  organizationId   String
+  reportType       String   // daily, weekly, monthly
+  title            String
+  content          String
+  dateRangeStart   DateTime
+  dateRangeEnd     DateTime
+  generatedAt      DateTime @default(now())
+  emailedAt        DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, reportType, generatedAt])
+}
+
+model ScheduledReport {
+  id               String   @id @default(cuid())
+  organizationId   String
+  reportType       String   // daily, weekly, monthly
+  title            String
+  isActive         Boolean  @default(true)
+  schedule         String   // cron expression
+  recipients       String   // JSON array of email addresses
+  lastRunAt        DateTime?
+  nextRunAt        DateTime?
+  settings         String   @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, isActive, nextRunAt])
+}
